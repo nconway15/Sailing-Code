@@ -1,7 +1,7 @@
 # Sailing-Code
 All code created or modified for Senior Thesis as of May 1, 2015.
 
-Running code required additional files not in this directory, Including: 
+Actually running code requires additional files not in this directory, Including: 
 -A servo library (servo.h)
 -Energia library (Energia.h)
 -Arduino library to port over commands
