@@ -50,10 +50,11 @@ TinyGPSPlus gps; //Creates a object with in the TinyGPS library
 TinyGPSCustom windTrueMeasure(gps, "WIMDA", 3); //Custom class that retreives the wind angle (0 to 359.9, in relation to bow)
 TinyGPSCustom headingMeasure(gps, "HCHDT", 1); //Custom class that retreives the true heading in degrees (x.x) 
 TinyGPSCustom windMeasure(gps, "WIMWV", 1); //Custom class that wind angle in relation to magnetic north 
-TinyGPSCustom rollMeasure(gps, "YXXDR", 5); //Custom class for roll angular displacment, Roll to STBD is positive
-TinyGPSCustom pitchMeasure(gps, "YXXDR", 1); //Custom class for Pitch angular displacment
-TinyGPSCustom magXMeasure(gps, "PAMTO", 1); //Custom class for Pitch angular displacment
-TinyGPSCustom magYMeasure(gps, "PAMTO", 2); //Custom class for Pitch angular displacment
+TinyGPSCustom rollMeasure(gps, "YXXDR", 6); //Custom class for roll angular displacment, Roll to STBD is positive
+TinyGPSCustom pitchMeasure(gps, "YXXDR", 2); //Custom class for Pitch angular displacment
+TinyGPSCustom magXMeasure(gps, "PAMTO", 2); //Custom class for magnometer reading in the x direction
+TinyGPSCustom magYMeasure(gps, "PAMTO", 3); //Custom class for magnometer reading in the y direction
+TinyGPSCustom magZMeasure(gps, "PAMTO", 4); //Custom class for magnometer reading in the z direction (currently reads zero)
 //////////////////////////////////////////////////////////////////////////////////////////
 // Compass navigation
 int targetHeading;              // where we want to go to reach current waypoint
@@ -122,6 +123,7 @@ int roll;
 int pitch;
 int magX;
 int magY;
+int magZ;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -171,6 +173,7 @@ void loop()
     isRCmode(); //Determins if we are in RC mode, 
       //Sub-Functions: rcMOde()
           //Sub-Functions rcRudderPosition() || rcWingPosition()
+    ShouldWeTack();
     //Add on Functions: smartDelay()
     smartDelay(500);
     Serial.println("Loop");
@@ -188,13 +191,8 @@ if (gps.location.isUpdated() || gps.satellites.isUpdated() ||
     rollMeasure.isUpdated() || pitchMeasure.isUpdated() || gps.time.minute() ||
     magXMeasure.isUpdated() || magYMeasure.isUpdated() )
   {
-    Serial.print(F("ALT="));   Serial.print(gps.altitude.meters()); 
-    Serial.print(F(" windMeasure=")); Serial.print(windTrueMeasure.value()); 
-    Serial.print(F(" headingMeasure=")); Serial.print(headingMeasure.value()); 
-   // Serial.print(F(" VDOP=")); Serial.print(vdop.value());
-    Serial.print(F(" SATS=")); Serial.println(gps.satellites.value());
-    currentLat = (gps.location.lat())/100;
-    currentLng = (gps.location.lng())/100;
+    currentLat = (gps.location.lat());
+    currentLng = (gps.location.lng());
     currentHeading = atoi(headingMeasure.value());
     currentWindAngle = atoi(windMeasure.value());
     currentTrueWindAngle = atoi(windTrueMeasure.value());
@@ -203,7 +201,7 @@ if (gps.location.isUpdated() || gps.satellites.isUpdated() ||
     currentTime = (gps.time.minute());
     magX = atoi(magXMeasure.value());
     magY = atoi(magYMeasure.value());
- 
+    magZ = atoi(magZMeasure.value());
   }
 
   while (Serial1.available() > 0)
@@ -294,6 +292,7 @@ int SailCondition()
       case up: //upwind, should flash red and green LED
       
       upWindLights();
+      if(tack == false)
       courseToWaypoint1();
       
       break;
@@ -306,6 +305,7 @@ int SailCondition()
       case dwn: //down wind, should flash green LED
       
       downWindLights();
+      if(tack == false)
       courseToWaypoint3();
       
       break;
@@ -320,8 +320,17 @@ int SailCondition()
 //-----------UP WIND-------------------------------------------
 int courseToWaypoint1() //Up Wind
 {
-  targetHeading = averageWindAngle + 45;
+
+ if(onPort) //on a port side tack
+ targetHeading = averageWindAngle + 45;
+ else //on a stbd side tack
+ targetHeading = averageWindAngle - 45; 
  
+ //correct for anglular wrap around
+ if(targetHeading > 360)
+ targetHeading -= 360;
+ else if(targetHeading < 0)
+ targetHeading += 360; 
 } //courseToWaypoint1() Up Wind
 
 //-----------BEAM REACH----------------------------------------- 
@@ -348,8 +357,12 @@ int courseToWaypoint2() //beam reach
 //-------------DOWN WIND----------------------------------------
 int courseToWaypoint3() //down wind
 {
- targetHeading = averageWindAngle + 135; //Set course so thatthe true wind is equal to 135 deg. 
- 
+  
+if(onPort)
+ targetHeading = averageWindAngle + 135; //Set course so that the true wind is equal to 135 deg. 
+else
+  targetHeading = averageWindAngle - 135; //Set course so that the true wind is equal to 135 deg.
+  
  //correct for anglular wrap around
  if(targetHeading > 360)
  targetHeading -= 360;
@@ -593,6 +606,9 @@ void courseOnTack()
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void ShouldWeTack()
 { 
+      if(averageTrueWindAngle > 180) {onPort = true;}
+      else onPort = false;
+      
       //roll over the time if the end of hour is reached. Time counts minutes, only to 60.
       if(currentTime < timeOfTack)
       {currentTime += 60;}
@@ -605,22 +621,36 @@ void ShouldWeTack()
                   if(courseToWayPoint - courseToWayPointTack < courseToWayPoint - targetHeading) //If True we need to tack
                   {
                   tack = true;
-                  timeOfTack = currentTime;
-                        if(onPort) //If Port is true, true wind is to port side
-                        {
-                          targetHeading = targetHeading + (2*averageTrueWindAngle); 
-                        }                      
+                  timeOfTack = currentTime; 
+                  
+                     if(onPort) //If Port is true, true wind is to port side need to turn port to put wind to stbd
+                      {
+                        targetHeading = targetHeading + (2*averageTrueWindAngle); 
+                      }
+                      else //Wind is to stbd side, need to turn to Stbd to put wind to port
+                      {
+                       targetHeading = targetHeading - (2*averageTrueWindAngle);
+                      }       
                   } //end if(courseToWayPoint)
       } //end if(timeToTack)
+      
+      if(tack == true) //Used to keep vessel tacking until the new heading is close to being reached
+      {
+                     if(headingError < HEADING_TOLERANCE) //If Port is true, true wind is to port side need to turn port to put wind to stbd
+                            tack = false;
+                     else   tack = true;
+      }
   
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 /* tilt compensated magnetic sensor measurements
-  float magxcomp = Magx*cos(Pitch)+Magz*sin(Pitch);
-  float magycomp = Magx*sin(Roll)*sin(Pitch)+Magy*cos(Roll)-Magz*sin(Roll)*cos(Pitch);
+void tiltCompensateCompass()
+{
+  float magxcomp = magX*cos(pitch)+magZ*sin(pitch);
+  float magycomp = magX*sin(roll)*sin(pitch)+magX*cos(roll)-magZ*sin(roll)*cos(pitch);
 
   // arctangent of y/x converted to degrees
   Heading = 180*atan2(magycomp,magxcomp)/PI;
-  */
+} */
   
