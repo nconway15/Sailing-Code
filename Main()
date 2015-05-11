@@ -1,41 +1,58 @@
-#include <TinyGPS++.h> // A library created to decode the NMEA GPS strings (not AirMar Specific), file must be on your computer
-#include <wayPointclass.h>
+/*The following code was written as part of the completion of a Webb Institute senior thesis. 
+The purpose of this thesis was to design and build a autonomous transatlantic sailboat. 
+The team consisted of Nolan Conway, Satchel Douglas, and Matthew Weklar. This code and supporting 
+libraries, are written to compile in either Energia or Arduino. This section of code is designed 
+to operate the vessel either autonomously or with remote control inputs.  The following code was 
+written as part of the completion of a Webb Institute senior thesis. The purpose of this thesis 
+was to design and build a autonomous transatlantic sailboat. The team consisted of Nolan Conway, 
+Satchel Douglas, and Matthew Weklar. This code and supporting libraries, are written to compile in 
+either Energia or Arduino. This section of code is designed to operate the vessel either autonomously 
+or with remote control inputs.  
+
+
+A Texas-Instruments MSP430expFR5969 MCU board was used*/
+
+
+//The following are libraries included by the compiler. These files must be in the same directory.
+#include <TinyGPS++.h> // A library created to decode the NMEA GPS strings (not AirMar Specific).
+#include <wayPointclass.h> //A library file that allows for the entering of course waypoints
 #include "Energia.h" // The basic MSP430 Library, allows the use of basic control terms (ex. HIGH.LOW, ect.)
-#include <Servo.h>   // Use for control of the wing sail servo
-  
-#define PinRC 13
-#define PinWing 19
-#define PinRudder 9
-#define PinRCwing 12
-#define PinRCrudder 11
-#define PinRudderPos 5
+#include <Servo.h>   // Use for control of the wing sail servo (Source: Energia)
+ 
+//The following items are redfined when compiling to make code more readable
+#define PinRC 13  //Pin 13, on/off remote controll switch
+#define PinWing 19 //Pin 19, position control of the wing servo
+#define PinRudder 9 //Pin 9, position control of the rudder 
+#define PinRCwing 12 //Pin 12, RC signal input for the wind control 
+#define PinRCrudder 11 //Pin 11, RC signal input for the rudder
+#define PinRudderPos 5 //PIn 5, Position feedback from the rudder 
   
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-Servo wingServo; //Creates the servo as an object, requires the Servo.h library be included
-int wingPos = 0;  //Creates the variable to store the wing servo position
-Servo rudder;
-int rudderPos = 0;
+Servo wingServo; //Creates the servo as an object, requires the Servo.h library to be included
+int wingPos = 0;  //Initialize the variable to store the wing servo position
+Servo rudder; //Creates the linear actuator as an object, requires the Servo.h library to be included
+int rudderPos = 0; //Analog position feedback from the rudder linear actuator
 
-int WingPWM = 90;
-int RudderPWM = 90;
-int PWMfactorWing = 0.01;
-int PWMfactorRudder = 0.01;
+int WingPWM = 90; //Control of the wing, value from 0 to 180
+int RudderPWM = 90; //Control of the rudder, value from 0 to 180
+int PWMfactorWing = 0.01; //A scaling factor to adjust the rate at which the PWM is changed
+int PWMfactorRudder = 0.01; //A scaling factor to adjust the rate at which the PWM is changed
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //RC Globally defined variables
 
 // The values that are read from the input pins
-int rcON;
-int rcWing;
-int rcRudder;
+int rcON; //Based on a flip switch 
+int rcWing; //Throttle based
+int rcRudder; //Throttle based
 
 // The values that are mapped to the correct range for output pins
-int rcONValue;
+int rcONValue; 
 int rcWingValue;
 int rcRudderValue;
 int rcONAvg; //A running average which is then output to the board
 
-//the board internal timmer for time-out move ons
+//The board internal timmer for time-out functions
 long TimeRC;
 long TimeRudder;
 long TimeWing;
@@ -46,10 +63,12 @@ static const int TimeRateRudder = 10;
 static const int TimeRateRC = 100;
 static const int rcHertz=100;
 ///////////////////////////////////////////////////////////////////////////////////////////
+//Creation of libraries for reading from GPS, objects defined in seperate header file
 TinyGPSPlus gps; //Creates a object with in the TinyGPS library 
-TinyGPSCustom windTrueMeasure(gps, "WIMDA", 3); //Custom class that retreives the wind angle (0 to 359.9, in relation to bow)
-TinyGPSCustom headingMeasure(gps, "HCHDT", 1); //Custom class that retreives the true heading in degrees (x.x) 
+TinyGPSCustom windTrueMeasure(gps, "WIMWD", 3); //Custom class that retreives the wind angle (0 to 359.9, in relation to bow)
+TinyGPSCustom windSpeedMeasure(gps, "WIMWD", 5); //Custom class that retreives the wind angle (0 to 359.9, in relation to bow)
 TinyGPSCustom windMeasure(gps, "WIMWV", 1); //Custom class that wind angle in relation to magnetic north 
+TinyGPSCustom headingMeasure(gps, "HCHDT", 1); //Custom class that retreives the true heading in degrees (x.x) 
 TinyGPSCustom rollMeasure(gps, "YXXDR", 6); //Custom class for roll angular displacment, Roll to STBD is positive
 TinyGPSCustom pitchMeasure(gps, "YXXDR", 2); //Custom class for Pitch angular displacment
 TinyGPSCustom magXMeasure(gps, "PAMTO", 2); //Custom class for magnometer reading in the x direction
@@ -63,7 +82,7 @@ int headingError;               // signed (+/-) difference between targetHeading
 #define HEADING_TOLERANCE 5     // tolerance +/- (in degrees) within which we don't attempt to turn to intercept targetHeading
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
-const int numWindReadings = 5;
+const int numWindReadings = 5; //The number of readings stored
 int windRelativeToMark;
 
 int readings[numWindReadings]; // the readings from the wind angle input
@@ -78,8 +97,9 @@ int totalTrueWind = 0; // the running total Wind
 int averageTrueWindAngle = 0; // the averageWind
 int currentTrueWindAngle; //the actual wind 
 ////////////////////////////////////////////////////////////////////////////////////////////////
+//Three conditions possible, UpWind, DownWind, and Beam Reach
 enum sailConditions {up, dwn, bm} ;
-sailConditions sailCondition = dwn;
+sailConditions sailCondition = up; 
 
 //Steering Options
 enum directions {port, stbd, straight} ;
@@ -87,14 +107,14 @@ directions turnDirection = straight;
 
 
 //WayPoint Distances
-float currentLat,
-      currentLng,
-      targetLat,
-      targetLng;
-int distanceToTarget = 100,            // current distance to target (current waypoint)
-    originalDistanceToTarget;    // distance to original waypoing when we started navigating to it   
-double courseToWayPoint; 
-double courseToWayPointTack;
+float currentLat, //The current Latitude
+      currentLng, //The current Longitude 
+      targetLat, //Latitude of next Waypoint
+      targetLng;  //Longitude of next Waypoint
+int distanceToTarget,            // current distance to target (current waypoint)
+    originalDistanceToTarget;    // distance to waypoing when we started navigating to it  (distance between points) 
+double courseToWayPoint;         //The angle between the vessel and the waypoint
+double courseToWayPointTack;     //The mirroring angle that would be created if the vessel tacks
     
 // Waypoints
 #define WAYPOINT_DIST_TOLERANE  .0001   // tolerance in meters to waypoint; once within this tolerance, will advance to the next waypoint
@@ -107,20 +127,20 @@ waypointClass waypointList[NUMBER_WAYPOINTS] =
     waypointClass(40.885310, -73.644939), //South West corner of soccer field
     waypointClass(40.88503, -73.64429) }; //Back to top of soccer field 
     
-
-boolean LEDstate;
+boolean LEDstate; //The status of the LED lights, used only for troubleshooting 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 boolean tack = true; //Only true when we are in the process of tacking, set false once a tack is complete
 boolean onPort = true; //Port(true) and Stbd(false)
-int timeSinceTack;
-int timeOfTack; 
-int currentTime;
-const int timeToTack = 4;
+int timeSinceTack; //Time in minutes since the last tack, value rolls over at 60
+int timeOfTack;  //Value of minutes from GPS time declared at start of a new tack
+int currentTime; //Value of minutes from GPS time declared 4 times a second
+const int timeToTack = 4; //The minimum amount of minutes between two tacks
 //////////////////////////////////////////////////////////////////////////////////////////////////////
-
+//Vessel attitude, pulled from Airmar device
 int roll;
 int pitch;
+//Airmar magneometer information in X, Y, and Z directions
 int magX;
 int magY;
 int magZ;
@@ -128,40 +148,48 @@ int magZ;
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//Void Setup() is required in the code structure. The code in this sections is run only once after any power cycle
 void setup()
 {
-  //Begin Serial Communication and LED outputs (both used for debugging)
+  //Begin Serial Communicationand  (Serial1 is for debugging, Serial1 is the Airmar)
   Serial.begin(115200);  // This will pass any information we want to the computer for debugging 
   Serial1.begin(4800);	// opens serial port, sets data rate to 9600 bps, Used for the Airmar 150wx Sensor. 
   
-  //LED Use is only for help determining what section of code the program is executing (used in SailCondition())
+  //LED use is only for help determining what section of code the program is executing (used in SailCondition())
   pinMode(RED_LED, OUTPUT); // initialize the digital pin as an output.
   pinMode(GREEN_LED, OUTPUT); // initialize the digital pin as an output.
   LEDstate = true; //a flipping counter for the LED pins
   
-  //Assign wing and servo control outputs to pin numbers & RC signal as inputs 
+  //Assign wing and servo control outputs to the pins defined
   wingServo.attach(PinWing);  // Wing Servo: attaches the servo on pin 19 to the servo object for the wing sail servo
   rudder.attach(PinRudder); //The rudder actuator is controlled via a controller as if it were a servo
-  //pinMode(PinRudder, OUTPUT);    // Rudder Motor: attaches the signal for the linear actuator to pin 9 for the rudder control
-  pinMode(PinRC, INPUT);     // RC Enabled: input to determin if the a switch on the RC controller is on
+  
+  //Assign pins as inputs that will be reading 
+  pinMode(PinRC, INPUT);          // RC Enabled: input to determin if the a switch on the RC controller is on
   pinMode(PinRCwing, INPUT);     // RC Mode Wing: input for the RC controller of the wing servo
-  pinMode(PinRCrudder, INPUT);     // RC Mode Rudder: input for the RC controller to the linear actuator 
-  pinMode(PinRudderPos, INPUT);     // Ruder Motor: Read for the rudder position (linear potentiometer) 
+  pinMode(PinRCrudder, INPUT);   // RC Mode Rudder: input for the RC controller to the linear actuator 
+  pinMode(PinRudderPos, INPUT);  // Ruder Motor: Read for the rudder position (linear potentiometer) 
 
   // get initial waypoint; also sets the distanceToTarget and courseToTarget varilables
   nextWaypoint();
+    //Sub function of distanceToWayPoint()
   
   //wind angle array initialization
     for (int thisWindReading = 0; thisWindReading < numWindReadings; thisWindReading++)
+    {
+    //for all values in the array, reset them to zero
     readings[thisWindReading] = 0; 
+    readingsTrue[thisWindReading] = 0;
+    }
 }
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//Void loop() is a mandatory part of the program structure. The functions in this section of code will repeat as quickly the device can process them.
 void loop()
 {
     
-    getAirmarInfo(); //Retrieves the Latitude, Longitude, and compass heading 
+    getAirmarInfo(); //Retrieves serial stream from Airmar device, requires included custom GPS library
     WindAngleAvg(); //A running average of the wind angle relative to magnetic nonrth and of True Wind to the boats bow
     distanceToWaypoint();
       //Sub-Function: nextWaypoint() only called when distance is within tolerance to waypoint
@@ -182,6 +210,7 @@ void loop()
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+//This function reads the serial stream from the Airmar. The data stream is processed by calls to the custom GPS library included
 void getAirmarInfo()
 {
 
@@ -191,31 +220,35 @@ if (gps.location.isUpdated() || gps.satellites.isUpdated() ||
     rollMeasure.isUpdated() || pitchMeasure.isUpdated() || gps.time.minute() ||
     magXMeasure.isUpdated() || magYMeasure.isUpdated() )
   {
-    currentLat = (gps.location.lat());
-    currentLng = (gps.location.lng());
-    currentHeading = atoi(headingMeasure.value());
-    currentWindAngle = atoi(windMeasure.value());
-    currentTrueWindAngle = atoi(windTrueMeasure.value());
-    pitch = atoi(pitchMeasure.value());
-    roll = atoi(rollMeasure.value());
-    currentTime = (gps.time.minute());
-    magX = atoi(magXMeasure.value());
-    magY = atoi(magYMeasure.value());
-    magZ = atoi(magZMeasure.value());
+    currentLat = (gps.location.lat()); //current latitude from the GPS
+    currentLng = (gps.location.lng()); //current longitude from GPS
+    currentHeading = atoi(headingMeasure.value()); //current heading, atoi() converts the char* to a integer value
+    currentWindAngle = atoi(windMeasure.value()); //current wind angle (respect to north), atoi() converts the char* to a integer value
+    currentTrueWindAngle = atoi(windTrueMeasure.value()); //current true wind angle, atoi() converts the char* to a integer value
+    pitch = atoi(pitchMeasure.value()); //current pitch, degrees, atoi() converts the char* to a integer value
+    roll = atoi(rollMeasure.value()); //current roll, degrees, atoi() converts the char* to a integer value
+    currentTime = (gps.time.minute()); //The minute of the hour from GPS real time (ex: 6:36pm = 36)
+    magX = atoi(magXMeasure.value()); //magnetic field in the x-direction, guas, atoi() converts the char* to a integer value
+    magY = atoi(magYMeasure.value()); //magnetic field in the y-direction, guas, atoi() converts the char* to a integer value
+    magZ = atoi(magZMeasure.value()); //magnetic field in the z-direction, guas, atoi() converts the char* to a integer value
   }
 
+  //WHile there is a data stream available, try to process it
   while (Serial1.available() > 0)
     gps.encode(Serial1.read());
 
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//This function is a smoothing function for both the true wind angle and the wind angle relative to north
+//The wind angle readings are stored in a array. The array sized is defined in variable initialization.
 void WindAngleAvg()
 {
   
   // subtract the last reading:
   totalWind= totalWind - readings[indexWind]; 
   // read from the sensor: 
-  readings[indexWind] = currentWindAngle; //This needs to be made to equal the actual wind value read each time from the serial stream
+  readings[indexWind] = currentWindAngle; //Set this array value to the current wind angle reading
   // add the reading to the totalWind:
   totalWind= totalWind + readings[indexWind]; 
 
@@ -226,7 +259,7 @@ void WindAngleAvg()
   // subtract the last reading:
   totalTrueWind = totalTrueWind - readingsTrue[indexWind]; 
   // read from the sensor: 
-  readingsTrue[indexWind] = currentTrueWindAngle; //This needs to be made to equal the actual wind value read each time from the serial stream
+  readingsTrue[indexWind] = currentTrueWindAngle; //Set this array value to current true wind angle reading
   // add the reading to the totalWind:
   totalTrueWind = totalTrueWind + readingsTrue[indexWind]; 
   // calculate the averageWind:
@@ -242,17 +275,23 @@ void WindAngleAvg()
     indexWind = 0; 
 //----------------------------------------------------
 
+//The wind angle relative to the waypoint, used to determin the sailing condition 
+if(averageWindAngle > courseToWayPoint)
 windRelativeToMark = averageWindAngle - courseToWayPoint;
+else
+windRelativeToMark = courseToWayPoint - averageWindAngle; 
+//Account for compass wrap
  if(windRelativeToMark > 180)
     windRelativeToMark = 360 - windRelativeToMark;
     
-} //end windAngle() */ 
+} //end windAngle() 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// modified from TinyGPS library
+// This function calculates distance along the great circle to the next waypoint
+//modified from TinyGPS library
 int distanceToWaypoint() 
 {
-  
+  //calculation using the haversine equation
   float delta = radians(currentLng - targetLng);
   float sdlong = sin(delta);
   float cdlong = cos(delta);
@@ -272,17 +311,20 @@ int distanceToWaypoint()
    
   // check to see if we have reached the current waypoint
   if (distanceToTarget <= WAYPOINT_DIST_TOLERANE)
-    nextWaypoint();
+    nextWaypoint(); //function only called when near next waypoint
     
   return distanceToTarget;
 }  // distanceToWaypoint()
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+//Function to determine whether vessel is upwind, downwind, or on a reach.
+//Baed upon condition, one of three course setting functions are called
 int SailCondition()
 {
     //What sail condition are we in????----------------------------------------------------------------------
    
+   //the angle of the wind relative to a straight line between the vessel and the mark
    if (windRelativeToMark >= 0 && windRelativeToMark < 45){sailCondition = up;}
    else if (windRelativeToMark >= 45 && windRelativeToMark <= 135) {sailCondition = bm;}
    else (windRelativeToMark > 135 && windRelativeToMark <= 180); {sailCondition = dwn;}
@@ -292,7 +334,7 @@ int SailCondition()
       case up: //upwind, should flash red and green LED
       
       upWindLights();
-      if(tack == false)
+      if(tack == false) //If we are in the middle of a tack, do not recalculate target heading
       courseToWaypoint1();
       
       break;
@@ -305,9 +347,8 @@ int SailCondition()
       case dwn: //down wind, should flash green LED
       
       downWindLights();
-      if(tack == false)
+      if(tack == false) //If we are in the middle of a tack, do not recalculate target heading
       courseToWaypoint3();
-      
       break;
       
       default: //if nothing else matches do this 
@@ -318,50 +359,52 @@ int SailCondition()
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////////////
 //-----------UP WIND-------------------------------------------
+//Sets the course so that true wind is 45 degrees off the bow
 int courseToWaypoint1() //Up Wind
 {
-
- if(onPort) //on a port side tack
+ if(onPort) //on a port side tack, turn further stbd of wind
  targetHeading = averageWindAngle + 45;
- else //on a stbd side tack
+ else //on a stbd side tack, turn further to port of wind 
  targetHeading = averageWindAngle - 45; 
  
  //correct for anglular wrap around
- if(targetHeading > 360)
- targetHeading -= 360;
+ if(targetHeading > 359)
+ targetHeading -= 359;
  else if(targetHeading < 0)
- targetHeading += 360; 
+ targetHeading += 359; 
 } //courseToWaypoint1() Up Wind
 
 //-----------BEAM REACH----------------------------------------- 
-// modified from TinyGPS library
+//Sets course sirectly for waypoint using an orthodome approximation for the heading
 int courseToWaypoint2() //beam reach
 {
 
-  float dlon = radians(targetLng-currentLng);
-  float cLat = radians(currentLat);
-  float tLat = radians(targetLat);
+  float dlon = radians(targetLng-currentLng); //change in longitude
+  float cLat = radians(currentLat); //current latitude in degrees
+  float tLat = radians(targetLat); //target latitude in degrees
   float a1 = sin(dlon) * cos(tLat);
   float a2 = sin(cLat) * cos(tLat) * cos(dlon);
   a2 = cos(cLat) * sin(tLat) - a2;
   a2 = atan2(a1, a2);
-  if (a2 < 0.0)
+  if (a2 < 0.0) //adjust for wrap around
   {
     a2 += TWO_PI; 
   }
-  targetHeading = degrees(a2);  
+  targetHeading = degrees(a2);  //set the target heading for a beam reach
   
   return targetHeading;
 }   // courseToWaypoint2() beam reach
 
 //-------------DOWN WIND----------------------------------------
+
+//Function to set the target heading in the down wind condition
 int courseToWaypoint3() //down wind
 {
   
 if(onPort)
- targetHeading = averageWindAngle + 135; //Set course so that the true wind is equal to 135 deg. 
+ targetHeading = averageWindAngle - 135; //Set course so that the true wind is equal to 135 deg. 
 else
-  targetHeading = averageWindAngle - 135; //Set course so that the true wind is equal to 135 deg.
+  targetHeading = averageWindAngle + 135; //Set course so that the true wind is equal to 135 deg.
   
  //correct for anglular wrap around
  if(targetHeading > 360)
@@ -371,6 +414,7 @@ else
 } //courseToWaypoint3() down wind
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//Function to determine whether or not we are on our target heading and what needs to be done to get there
 void CalcDesiredTurn(void)
 {
     // calculate where we need to turn to head to destination
@@ -389,115 +433,123 @@ void CalcDesiredTurn(void)
       turnDirection = port;
     else if (headingError > 0)
       turnDirection = stbd;
-    else
+    else //default to straight if unable to calculate choice
       turnDirection = straight;
  
 }  // calcDesiredTurn()
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void changeRudderAngle() //Add additional case statements that increase or decrease proportional to how much turn is needed
+//Function that sets the control variable and results in physical movement from the rudder
+void changeRudderAngle() 
 {
-  if(turnDirection == port) 
-  RudderPWM = RudderPWM + headingError*PWMfactorRudder;
-  else if(turnDirection == stbd)
-  RudderPWM = RudderPWM - headingError*PWMfactorRudder;
-  else 
-  RudderPWM = RudderPWM;
+//A PWM @ 90 = neutral, not motion of rudder
+//Values less then 90 retract the rudder actuator, turns to port
+//Values above 90 but less then 180 extend the rudder actuator, turns to Stbd
+      if(turnDirection == port)
+     { 
+         if(RudderPWM < 178)
+          RudderPWM += 1;
+     }
+      else if(turnDirection == stbd)
+      {
+          if(RudderPWM > 2)
+          RudderPWM -= 1;
+      }
+      else if(turnDirection == straight) 
+      RudderPWM = 90; 
+      else 
+      RudderPWM = RudderPWM;
   
-  rudder.write(RudderPWM);
+  //Actually write the rudder position to the actuator (uses Servo.h)
+  rudder.write(RudderPWM); 
+  
 }
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-
+//Function that sets values outputed to physically control the servo on the wing. Used to set angles of attack. 
 void changeWingAngle() //Add additional case statements that increase or decrease proportional to how much turn is needed
 {
   //The servo PWM is written directly as its angle between 0 and 180
   if(averageWindAngle <=180){};
-    
   WingPWM = WingPWM;
+  
+  //Writes value to servo through the output pin
   wingServo.write(WingPWM); 
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////
-
+//Function used to advance to our next waypoint. Only called if vessel is near enough the current waypoint.
 void nextWaypoint(void)
 {
-  waypointNumber++;
-  targetLat = waypointList[waypointNumber].getLat();
-  targetLng = waypointList[waypointNumber].getLong();
+  waypointNumber++; //Add one to the waypoint number
+  targetLat = waypointList[waypointNumber].getLat(); //retrieve the next points latitude
+  targetLng = waypointList[waypointNumber].getLong(); //retrieve the next points longitude
+  Serial.println("Way Point Reached");
   
- // if ((targetLat == 0 && targetLng == 0) || waypointNumber >= NUMBER_WAYPOINTS)    // last waypoint reached? 
   if (waypointNumber >= NUMBER_WAYPOINTS)    // last waypoint reached? 
     {
 
       Serial.println("End of Way Points Reached");
        
     }
-    
-   distanceToTarget = originalDistanceToTarget = distanceToWaypoint();
+   //Sets the original distance to the Waypoint's distance, only set once per waypoint
+   distanceToTarget = originalDistanceToTarget = distanceToWaypoint(); 
    
 }  // nextWaypoint()
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// Sailing Condition indicator Lights
-void upWindLights()
+// Sailing Condition indicator Lights: Used to flash LED lights depending on sailing condition. Used only to troubleshoot. 
+void upWindLights() //Flash the green and red LED lights opposite eachother
 {
   if(LEDstate == true)
   {
       digitalWrite(RED_LED, HIGH);
-      digitalWrite(GREEN_LED, LOW);  // turn the LED on (HIGH is the voltage level)
-       Serial.println("up wind flash on"); 
+      digitalWrite(GREEN_LED, LOW);  // turn the LED on (HIGH is the voltage level) 
       LEDstate = false;
   }
   else
   {
       digitalWrite(RED_LED, LOW);
       digitalWrite(GREEN_LED, HIGH);  // turn the LED on (HIGH is the voltage level) 
-      Serial.println("up wind flash off");
       LEDstate = true;
   }
   
 } // END of upWindLights function 
 //-----------------------------------------------------------------------------------------------
-void beamReachLights()
+void beamReachLights() //Green light off, Flash the red light
 {
   if(LEDstate == true)
   {
       digitalWrite(RED_LED, HIGH);
-      Serial.println("beam wind on");
       LEDstate = false;
   }
   else
   {
       digitalWrite(RED_LED, LOW);
-      Serial.println("beam wind low");
       LEDstate = true;
   }
   digitalWrite(GREEN_LED, LOW);
   
 } // END of beamReachLights function 
 //-----------------------------------------------------------------------------------------------
-void downWindLights()
+void downWindLights() //Red light off, flash the green light
 {
   if(LEDstate == true)
   {
       digitalWrite(GREEN_LED, HIGH);
-      Serial.println("down wind on");
       LEDstate = false;
   }
   else
   {
       digitalWrite(GREEN_LED, LOW);
-      Serial.println("down wind low");
       LEDstate = true;
   }
   digitalWrite(RED_LED, LOW);
 } // END of downWindLights function 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-
+//Function reads the input of a flip-switch on the RC controller. If switch is down, RC mode is enabled. 
 void isRCmode()
 {
     int rcPin = 0;             // varible to intialize the RC enable pin
@@ -509,6 +561,8 @@ void isRCmode()
     } // End RC if statement check
 }    
 //-----------------------------------------------------------------------------------------------------------------    
+
+//Function only called when RC mode is enabled, used to read the RC input signals and map them to output pins
 void rcMode(){
   int rcOutLow = 0;
   int rcOutHigh = 180;
@@ -532,15 +586,18 @@ void rcMode(){
     WingPWM = (WingPWM + rcWingValue)/2; 
     RudderPWM = (RudderPWM + rcRudderValue)/2; 
     
-    rcRudderPosition();
-    rcWingPosition();
-  
     TimeRC= millis(); //change of time
+    //Move the rudder
+    rcRudderPosition();
+    //Move the wing servo
+    rcWingPosition();
+    //Check if still in RC mode (Function is recursive) 
+    isRCmode();
+    
   }
 }
 
 //RC Control of the Sail Servo----------------------------------------------------------------------
-
 void rcRudderPosition()
 {
   
@@ -556,33 +613,34 @@ void rcRudderPosition()
 }
 
 
-//Control of the Servo------------------------------------------------------------------------------
-
-
+//RC Control of the Wing Servo------------------------------------------------------------------------------
 void rcWingPosition(){
   
      if(millis()-TimeWing>(1000/TimeRateWing)){ //if a certain time has past since last printed data, print data
          
         wingServo.write(WingPWM);
-  
+         //0 = full speed stbd
+        //90 = neutral
+        //180 = full speed port
         TimeWing=millis(); //time since last data print is zero
      }
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-// This custom version of delay() ensures that the gps object
-// is being "fed".
+// This custom version of delay() ensures that the gps object is being "fed".
+//Using regular delay() function caused error in checksums when decomding NMEA
 static void smartDelay(unsigned long ms)
 {
   unsigned long start = millis();
   do 
   {
+    //Continue to print in the NMEA data strings while doing waiting on everything else
     while (Serial1.available())
       gps.encode(Serial1.read());
   } while (millis() - start < ms);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//Calculates the heading to follow a great cirle route between the two points directly 
 void courseToPoint()
 {
    courseToWayPoint =
@@ -593,10 +651,16 @@ void courseToPoint()
       targetLng);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//If we were to tack this would be the planed heading
 void courseOnTack()
 {
-   
- courseToWayPointTack = targetHeading + (2*averageTrueWindAngle);
+ //Our current target heading plus twice the true wind 
+ if(onPort) 
+ courseToWayPointTack = targetHeading - (2*averageTrueWindAngle); //New path would require turning to port
+ else 
+ courseToWayPointTack = targetHeading + (2*averageTrueWindAngle); //New path would require turning to stbd
+ 
+ //Adjust for compass wrap
  if(courseToWayPointTack > 360)
  courseToWayPointTack -= 360;
  else if(courseToWayPointTack < 0)
@@ -604,8 +668,10 @@ void courseOnTack()
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//Checks if the course on tack is a better heading then our current, and if enough time has passed to allow for another tack
 void ShouldWeTack()
 { 
+      //Are we on a port side or Stbd side tack 
       if(averageTrueWindAngle > 180) {onPort = true;}
       else onPort = false;
       
@@ -618,25 +684,27 @@ void ShouldWeTack()
       //If enough time has passed since last tack, then check the conditions to tack (time is #defined at top)      
       if(timeToTack < timeSinceTack)
       {
+                  //Determin which course would result in a more direct course to the waypoint
                   if(courseToWayPoint - courseToWayPointTack < courseToWayPoint - targetHeading) //If True we need to tack
                   {
-                  tack = true;
+                  tack = true; //Tells the rest of the code tol hold off while we complete the tack
                   timeOfTack = currentTime; 
                   
                      if(onPort) //If Port is true, true wind is to port side need to turn port to put wind to stbd
                       {
-                        targetHeading = targetHeading + (2*averageTrueWindAngle); 
+                        targetHeading = targetHeading - (2*averageTrueWindAngle); 
                       }
                       else //Wind is to stbd side, need to turn to Stbd to put wind to port
                       {
-                       targetHeading = targetHeading - (2*averageTrueWindAngle);
-                      }       
+                       targetHeading = targetHeading + (2*averageTrueWindAngle);
+                      }  //end if else (onPort)    
                   } //end if(courseToWayPoint)
       } //end if(timeToTack)
       
       if(tack == true) //Used to keep vessel tacking until the new heading is close to being reached
       {
-                     if(headingError < HEADING_TOLERANCE) //If Port is true, true wind is to port side need to turn port to put wind to stbd
+                     //Keep skipping courseToWayPoint() until tack is complete 
+                     if(headingError < HEADING_TOLERANCE) 
                             tack = false;
                      else   tack = true;
       }
